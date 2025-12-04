@@ -1,9 +1,9 @@
+from random import random
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pydantic_ai import Agent
-import os
-from typing import List, Dict, Any
+import requests
+from typing import List
 import json
 
 app = FastAPI(title="Gift Finding Chatbot API")
@@ -30,53 +30,87 @@ class ChatResponse(BaseModel):
     suggestions: List[str] = []
     gifts: List[GiftSuggestion] = []
 
-agent = Agent(
-    'openrouter:meta-llama/llama-3.2-3b-instruct:free',
-    model_tools=[],
-)
+async def get_openrouter_response(prompt: str) -> str:
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer free",
+            "Content-Type": "application/json"
+        }
 
-conversations = {}
+        data = {
+            "model": "openrouter:meta-llama/llama-3.2-3b-instruct:free",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "you are a helpful assistant that suggests gifts based on user input. "
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 300
+        }
+
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+
+        if response.status_code == 200:
+            resp_json = response.json()
+            return resp_json['choices'][0]['message']['content']
+        else:
+            return get_fallback_response()
+    
+    except Exception as e:
+        return get_fallback_response()
+    
+def get_fallback_response() -> str:
+    fallbacks = [
+        """Here are some gift suggestions:
+        1. Gift Name: Personalized Mug
+        Reason: A personalized mug with a custom message or photo is a thoughtful gift that shows you care.
+        Price Range: Rs300 - Rs700
+        2. Gift Name: Scented Candles
+        Reason: Scented candles create a relaxing atmosphere and are perfect for unwinding after a
+        long day.
+        Price Range: Rs200 - Rs500
+        3. Gift Name: Indoor Plant
+        Reason: An indoor plant adds a touch of nature to any space and is great for improving air quality.
+        Price Range: Rs400 - Rs1000
+        """,
+        """Here are some gift suggestions:
+        1. Gift Name: Customized Photo Album
+        Reason: A photo album filled with cherished memories is a heartfelt gift that captures special moments.
+        Price Range: Rs500 - Rs1500
+        2. Gift Name: Gourmet Chocolate Box
+        Reason: A box of gourmet chocolates is a delicious treat that anyone would appreciate.
+        Price Range: Rs300 - Rs800
+        3. Gift Name: Fitness Tracker
+        Reason: A fitness tracker is a practical gift for someone who enjoys staying active and healthy.
+        Price Range: Rs1500 - Rs3000
+        """
+    ]
+    return random.choice(fallbacks)
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(chat_message: ChatMessages):
     try:
-        conv_id = chat_message.conversation_id
-        if conv_id not in conversations:
-            conversations[conv_id] = []
-        
-        conversations[conv_id].append({"role": "user", "content": chat_message.message})
-        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversations[conv_id][-5:]])
-        prompt = f""" You are a helpful assistant that suggests gifts based on user input.
-        Conversation History:
-        {context}
-
-        Users Last Message: {chat_message.message}
-
-        Your task: 
-        1. Answer Questions
-        2. Suggest 3 gift ideas relevant to the user's input.
-        3. Keep your response concise and relevant friendly and helpful.
-        4. Format gift suggestion as:
-        Gift Name: <name>
-        Reason: <reason>
-        Price Range: <price range>
-        If this is the first message, greet the user and ask for more details about the recipient.
+        prompt = f"""User is looking for gift suggestions based on the following message:
+        "{chat_message.message}"
+        Please provide 3 gift suggestions with the following details for each:
+        1. Gift Name
+        2. Reason why it's a good gift
+        3. Price Range
         """
 
-        result = await agent.run(prompt)
-        ai_response = str(result.data)
+        airesponse = await get_openrouter_response(prompt)
 
-        gifts = parse_gift_suggestions(ai_response)
-        suggestions = generate_suggestions(chat_message.message, ai_response)
-        conversations[conv_id].append({"role": "assistant", "content": ai_response})
+        gifts = parse_gift_suggestions(airesponse)
+        suggestions = generate_suggestions(chat_message.message, airesponse)
+        return ChatResponse(reply=airesponse, suggestions=suggestions[:5], gifts=gifts[:3])
 
-        if len(conversations[conv_id]) > 10:
-            conversations[conv_id] = conversations[conv_id][-10:]
-
-        return ChatResponse(reply=ai_response, suggestions=suggestions, gifts=gifts)
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal Server Error")
     
 def parse_gift_suggestions(response: str) -> List[GiftSuggestion]:
     gifts = []
