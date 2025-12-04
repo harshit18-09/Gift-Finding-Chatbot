@@ -1,0 +1,23 @@
+{
+    "version": 2,
+    "builds": [
+        {
+        "src": "api/chat.py",
+        "use": "@vercel/python"
+        }
+    ],
+    "routes": [
+        { "src": "/(.*)", "dest": "api/chat.py" }
+    ],
+    "headers": [
+        {
+        "source": "/(.*)",
+        "headers": [
+            {"key": "Access-Control-Allow-Credentials", "value": "true" },
+            { "key": "Access-Control-Allow-Origin", "value": "*" },
+            { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS, PATCH, DELETE, PUT" },
+            { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With, Accept, X-CSRF-Token, X-Requested-With, Accept-Version, Content-Length, Content-MD5, Date, X-Api-Version" }
+        ]
+        }
+    ]
+}
